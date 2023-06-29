@@ -14,6 +14,9 @@
 """
 Created on June 04, 2022
 @author: khnguy22 NCSU
+updated on June 29, 2023
+@author: Juan C. Luque-Gutierrez NCSU
+
 
 comments: Interface for SIMULATE3 loading pattern optimzation
 """
@@ -44,6 +47,11 @@ class SimulateData:
     self.data["exposure"] = self.burnupEOC()
     self.data["assembly_power"] = self.assemblyPeakingFactors()
     self.data["fuel_type"] = self.fa_type()
+    self.data["fuelcost_invEFPD"] = self.FuelCostEFPD()
+    self.data["ArtObjOne"] = self.ArtificialObjectiveOne()
+    self.data["ArtObjTwo"] = self.ArtificialObjectiveTwo()
+    self.data["ConstCompl"] = self.ConstraintCompliance()
+
 #    self.data["pin_peaking"] = self.pinPeaking()
     # this is a dummy variable for demonstration with MOF
     # check if something has been found
@@ -213,7 +221,7 @@ class SimulateData:
     if not list_:
       return ValueError("No values returned. Check Simulate File executed correctly")
     else:
-      outputDict = {'info_ids':['MaxEFPD'], 'values': [float(1/list_[-1])]}
+      outputDict = {'info_ids':['MaxEFPD'], 'values': [list_[-1]]}
 
     return outputDict
 
@@ -515,9 +523,9 @@ class SimulateData:
     #stop
     #Considering that: FA type 0 is empty, type 1 reflector, type 2 2% enrichment, types 3 and 4 2.5% enrichment, and types 5 and 6 3.2% enrichment. The cost of burnable is not being considered
     if len(FAcount) == 7:
-      fuel_cost = (FAcount[0] + FAcount[1])*0 + FAcount[2]*4.94262343 + (FAcount[3] + FAcount[4])*5.67862599 + (FAcount[5] + FAcount[6])*6.7274349
+      fuel_cost = (FAcount[0] + FAcount[1])*0 + FAcount[2]*2.69520839 + (FAcount[3] + FAcount[4])*3.24678409 + (FAcount[5] + FAcount[6])*4.03739539
     else:
-      fuel_cost = (FAcount[0] + FAcount[1])*0 + FAcount[2]*4.94262343 + (FAcount[3] + FAcount[4])*5.67862599 + (FAcount[5])*6.7274349
+      fuel_cost = (FAcount[0] + FAcount[1])*0 + FAcount[2]*2.69520839 + (FAcount[3] + FAcount[4])*3.24678409 + (FAcount[5])*4.03739539
     print(fuel_cost)
     #fuel_type.append(float(search_space))
     #stop
@@ -525,7 +533,309 @@ class SimulateData:
       return ValueError("No values returned. Check Simulate File executed correctly")
     else:
       outputDict = {'info_ids':['fuel_cost'], 'values': [fuel_cost]}
+    return outputDict
+
+  def FuelCostEFPD(self):
+    """
+    Artificial variable, product of fuel cost and cycle length. This artificial variable is used to explore a potential solution to the max cycle length min fuel cost problem. 
+
+    """
+    list_efpd = []
+    outputDict = None
+    for line in self.lines:
+      if "Cycle Exp." in line:
+        if "EFPD" in line:
+          elems = line.strip().split()
+          spot = elems.index('EFPD')
+          list_efpd.append(float(elems[spot-1]))
+          
+    print(list_efpd[-1])
+
+    FAlist = []
+    for line in self.lines:
+      if "'FUE.TYP'" in line:
+        p1 = line.index(",")
+        p2 = line.index("/")
+        search_space = line[p1:p2]
+        search_space = search_space.replace(",","")
+        #print(search_space)
+        tmp= search_space.split()
+        for ii in tmp:
+          FAlist.append(float(ii))
+    FAtype = list(set(FAlist))
+    FAlist_A = FAlist[0]
+    FAlist_B = FAlist[1:9] + FAlist[9:73:9]
+    FAlist_C = FAlist[10:18] + FAlist[19:27] + FAlist[28:36] + FAlist[37:45] + FAlist[46:54] + FAlist[55:63] + FAlist[64:72] + FAlist[73:81]
+    FAcount_A = [float(fa == FAlist_A) for fa in FAtype]
+    FAcount_B = [float(FAlist_B.count(fa)*2) for fa in FAtype]
+    FAcount_C = [float(FAlist_C.count(fa)*4) for fa in FAtype]
+    FAcount = [FAcount_A[j] + FAcount_B[j] + FAcount_C[j] for j in range(len(FAtype))]
+    #print(FAcount)
+    #stop
+    #Considering that: FA type 0 is empty, type 1 reflector, type 2 2% enrichment, types 3 and 4 2.5% enrichment, and types 5 and 6 3.2% enrichment. The cost of burnable is not being considered
+    if len(FAcount) == 7:
+      fuel_cost = (FAcount[0] + FAcount[1])*0 + FAcount[2]*2.69520839 + (FAcount[3] + FAcount[4])*3.24678409 + (FAcount[5] + FAcount[6])*4.03739539
+    else:
+      fuel_cost = (FAcount[0] + FAcount[1])*0 + FAcount[2]*2.69520839 + (FAcount[3] + FAcount[4])*3.24678409 + (FAcount[5])*4.03739539
+    print(fuel_cost)
+    
+    fuelcost_invEFPD = fuel_cost/list_efpd[-1]
+    
+    print(fuelcost_invEFPD)
+    
+    if not fuelcost_invEFPD:
+      return ValueError("Verify interface script to see if there is any error")
+    
+    else:
+      outputDict = {'info_ids':['fuelcost_invEFPD'], 'values':[fuelcost_invEFPD]}
       return outputDict
+
+  def ArtificialObjectiveOne(self):
+    """ 
+    Artificial objective to include penalty. This variable is associated with the Cycle Length for min-min optimization (therefore, objective -Cycle Lenght)
+    """
+    
+    list_efpd = []
+    outputDict = None
+    for line in self.lines:
+      if "Cycle Exp." in line:
+        if "EFPD" in line:
+          elems = line.strip().split()
+          spot = elems.index('EFPD')
+          list_efpd.append(float(elems[spot-1]))
+    EFPD = list_efpd[-1]
+    print(f"ARTOBJONE - EFPD is equal to: {EFPD}")
+    
+    
+    boronList = []
+    for line in self.lines:
+      if "Boron Conc." in line and "ppm" in line:
+        elems = line.strip().split()
+        spot = elems.index('ppm')
+        boronList.append(float(elems[spot-1]))
+    max_boron = max(boronList)
+    print(f"ARTOBJONE - max_boron is equal to: {max_boron}")  
+    
+    g1 = 1.3 - max_boron/1000
+    
+    if g1 < 0:
+      g1 = abs(g1)
+    else:
+      g1 = 0
+    print(f"This is g1: {g1}")
+    
+    pin_peaking_list = []
+    for line in self.lines:
+      if "Max-3PIN" in line:
+        elems = line.strip().split()
+        spot = elems.index('Max-3PIN')
+        pin_peaking_list.append(float(elems[spot+1]))
+    
+    pin_peaking = max(pin_peaking_list)
+    print(f"ARTOBJONE - pin_peaking is equal to: {pin_peaking}")    
+    
+    g2 = 2.1 - pin_peaking
+    
+    if g2 < 0:
+      g2 = abs(g2)
+    else:
+      g2 = 0
+    print(f"This is g2: {g2}")
+    
+    list_FDH = []
+    for line in self.lines:
+      if "F-delta-H" in line:
+        elems = line.strip().split()
+        spot = elems.index('F-delta-H')
+        list_FDH.append(float(elems[spot+1]))
+    
+    MaxFDH = max(list_FDH)
+    print(f"ARTOBJONE - MaxFDH is equal to: {MaxFDH}")    
+    
+    g3 = 1.48 - MaxFDH
+    
+    if g3 < 0:
+      g3 = abs(g3)
+    else:
+      g3 = 0
+    print(f"This is g3: {g3}")
+    
+    w = (4*g1 + g2 + g3)*700 #P1 Penalty for Artificial Objective 1 = 70. One value assigned for sum of degree of violation of the three constraints.
+    
+    ArtObjOne = -list_efpd[-1] + w
+    print(f"THIS IS THE ARTIFICIAL OBJECTIVE ONE:{ArtObjOne}")
+    
+    if not ArtObjOne:
+      return ValueError("Verify that all values involved have been parsed correctly")
+    
+    else:
+      outputDict = {'info_ids':['ArtObjOne'], 'values':[ArtObjOne]}
+    return outputDict
+
+  def ArtificialObjectiveTwo(self):
+    """
+    Artificial objective to include penalty. This variable is associated with Fuel Cost for min-min optimization.
+    """
+    FAlist = []
+    for line in self.lines:
+      if "'FUE.TYP'" in line:
+        p1 = line.index(",")
+        p2 = line.index("/")
+        search_space = line[p1:p2]
+        search_space = search_space.replace(",","")
+        #print(search_space)
+        tmp= search_space.split()
+        for ii in tmp:
+          FAlist.append(float(ii))
+    FAtype = list(set(FAlist))
+    FAlist_A = FAlist[0]
+    FAlist_B = FAlist[1:9] + FAlist[9:73:9]
+    FAlist_C = FAlist[10:18] + FAlist[19:27] + FAlist[28:36] + FAlist[37:45] + FAlist[46:54] + FAlist[55:63] + FAlist[64:72] + FAlist[73:81]
+    FAcount_A = [float(fa == FAlist_A) for fa in FAtype]
+    FAcount_B = [float(FAlist_B.count(fa)*2) for fa in FAtype]
+    FAcount_C = [float(FAlist_C.count(fa)*4) for fa in FAtype]
+    FAcount = [FAcount_A[j] + FAcount_B[j] + FAcount_C[j] for j in range(len(FAtype))]
+    #print(FAcount)
+    #stop
+    #Considering that: FA type 0 is empty, type 1 reflector, type 2 2% enrichment, types 3 and 4 2.5% enrichment, and types 5 and 6 3.2% enrichment. The cost of burnable is not being considered
+    if len(FAcount) == 7:
+      fuel_cost = (FAcount[0] + FAcount[1])*0 + FAcount[2]*2.69520839 + (FAcount[3] + FAcount[4])*3.24678409 + (FAcount[5] + FAcount[6])*4.03739539
+    else:
+      fuel_cost = (FAcount[0] + FAcount[1])*0 + FAcount[2]*2.69520839 + (FAcount[3] + FAcount[4])*3.24678409 + (FAcount[5])*4.03739539
+    print(f"ARTOBJTWO - fuel_cost is equal to: {fuel_cost}")
+
+    boronList = []
+    for line in self.lines:
+      if "Boron Conc." in line and "ppm" in line:
+        elems = line.strip().split()
+        spot = elems.index('ppm')
+        boronList.append(float(elems[spot-1]))
+    max_boron = max(boronList)
+    print(f"ARTOBJTWO - max_boron is equal to: {max_boron}")  
+    
+    g1 = 1.3 - max_boron/1000
+    
+    if g1 < 0:
+      g1 = abs(g1)
+    else:
+      g1 = 0
+    print(f"This is g1: {g1}")
+    
+    pin_peaking_list = []
+    for line in self.lines:
+      if "Max-3PIN" in line:
+        elems = line.strip().split()
+        spot = elems.index('Max-3PIN')
+        pin_peaking_list.append(float(elems[spot+1]))
+    
+    pin_peaking = max(pin_peaking_list)
+    print(f"ARTOBJTWO - pin_peaking is equal to: {pin_peaking}")    
+    
+    g2 = 2.1 - pin_peaking
+    
+    if g2 < 0:
+      g2 = abs(g2)
+    else:
+      g2 = 0
+    print(f"This is g2: {g2}")
+    
+    list_FDH = []
+    for line in self.lines:
+      if "F-delta-H" in line:
+        elems = line.strip().split()
+        spot = elems.index('F-delta-H')
+        list_FDH.append(float(elems[spot+1]))
+    
+    MaxFDH = max(list_FDH)
+    print(f"ARTOBJTWO - MaxFDH is equal to: {MaxFDH}")    
+    
+    g3 = 1.48 - MaxFDH
+    
+    if g3 < 0:
+      g3 = abs(g3)
+    else:
+      g3 = 0
+    print(f"This is g3: {g3}")
+    
+    w = (4*g1 + g2 + g3)*700 #P2 Penalty for Artificial Objective 1 = 70. One value assigned for sum of degree of violation of the three constraints.
+     
+    ArtObjTwo = fuel_cost + w
+    print(f"THIS IS THE ARTIFICIAL OBJECTIVE TWO: {ArtObjTwo}")
+
+    if not ArtObjTwo:
+      return ValueError("Verify that all values involved have been parsed correctly")
+    
+    else:
+      outputDict = {'info_ids':['ArtObjTwo'], 'values':[ArtObjTwo]}
+    return outputDict
+
+  def ConstraintCompliance(self):
+      
+    """
+    Function to count constraints compliance of each genome in each generation. 
+    """
+    Constraints = 0
+    OutputDict = None 
+    boronList = []
+    for line in self.lines:
+      if "Boron Conc." in line and "ppm" in line:
+        elems = line.strip().split()
+        spot = elems.index('ppm')
+        boronList.append(float(elems[spot-1]))
+    max_boron = max(boronList)    
+    
+    g1 = 1.3 - max_boron/1000
+        
+    if g1 < 0:
+      Constraints += 1
+    else:
+      Constraints += 0
+    
+    pin_peaking_list = []
+    for line in self.lines:
+      if "Max-3PIN" in line:
+        elems = line.strip().split()
+        spot = elems.index('Max-3PIN')
+        pin_peaking_list.append(float(elems[spot+1]))
+    
+    pin_peaking = max(pin_peaking_list)   
+    
+    g2 = 2.1 - pin_peaking
+    
+    if g2 < 0:
+      Constraints += 1
+    else:
+      Constraints += 0
+    
+    list_FDH = []
+    for line in self.lines:
+      if "F-delta-H" in line:
+        elems = line.strip().split()
+        spot = elems.index('F-delta-H')
+        list_FDH.append(float(elems[spot+1]))
+    
+    MaxFDH = max(list_FDH)
+    
+    g3 = 1.48 - MaxFDH
+    
+    if g3 < 0:
+      Constraints += 1
+    else:
+      Constraints += 0
+
+    if g1 + g2 + g3 == 0:
+      Constraints = 0
+    else:
+      Constraints = Constraints
+
+    print(f"The number of constraints violated is: {Constraints}")
+    
+    if not Constraints:
+      return ValueError("Verify that constraints have been defined correctly")
+    
+    else:
+      outputDict = {'info_ids':['Constraints'], 'values':[Constraints]}
+    return outputDict
 
   def writeCSV(self, fileout):
     """
