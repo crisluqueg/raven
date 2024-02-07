@@ -22,6 +22,7 @@ comments: Interface for SIMULATE3 loading pattern optimzation
 """
 import os
 import numpy
+from statistics import mean # Needed for Avg Kinf at EOC Calculation. 
 
 class SimulateData:
   """
@@ -51,6 +52,7 @@ class SimulateData:
     self.data["ArtObjOne"] = self.ArtificialObjectiveOne()
     self.data["ArtObjTwo"] = self.ArtificialObjectiveTwo()
     self.data["ConstCompl"] = self.ConstraintCompliance()
+    self.data["Avg_Kinf_type_EOC"] = self.Avg_Kinf_EOC()
 
 #    self.data["pin_peaking"] = self.pinPeaking()
     # this is a dummy variable for demonstration with MOF
@@ -519,16 +521,43 @@ class SimulateData:
     FAcount_B = [float(FAlist_B.count(fa)*2) for fa in FAtype]
     FAcount_C = [float(FAlist_C.count(fa)*4) for fa in FAtype]
     FAcount = [FAcount_A[j] + FAcount_B[j] + FAcount_C[j] for j in range(len(FAtype))]
+    FA_type_dict = {int(FAtype[i]):FAcount[i] for i in range(len(FAtype))}
     print(FAcount)
     #stop
     #Considering that: FA type 0 is empty, type 1 reflector, type 2 2% enrichment, types 3 and 4 2.5% enrichment, and types 5 and 6 3.2% enrichment. The cost of burnable is not being considered
-    if len(FAcount) == 7:
-      fuel_cost = (FAcount[0] + FAcount[1])*0 + FAcount[2]*2.69520839 + (FAcount[3] + FAcount[4])*3.24678409 + (FAcount[5] + FAcount[6])*4.03739539
-    else:
-      fuel_cost = (FAcount[0] + FAcount[1])*0 + FAcount[2]*2.69520839 + (FAcount[3] + FAcount[4])*3.24678409 + (FAcount[5])*4.03739539
-    print(fuel_cost)
+    #if len(FAcount) == 7:
+    #  fuel_cost = (FAcount[0] + FAcount[1])*0 + FAcount[2]*2.69520839 + (FAcount[3] + FAcount[4])*3.24678409 + (FAcount[5] + FAcount[6])*4.03739539
+    #else:
+    #  fuel_cost = (FAcount[0] + FAcount[1])*0 + FAcount[2]*2.69520839 + (FAcount[3] + FAcount[4])*3.24678409 + (FAcount[5])*4.03739539
+    #print(fuel_cost)
     #fuel_type.append(float(search_space))
     #stop
+    
+    # Dictionary with the unit cost for each FA type.
+
+    # FA type 0 = empty         -> M$ 0.0
+    # FA type 1 = reflector     -> M$ 0.0
+    # FA type 2 = 2.00 wt%      -> M$ 2.69520839
+    # FA type 3 = 2.50 wt%      -> M$ 3.24678409
+    # FA type 4 = 2.50 wt% + Gd -> M$ 3.24678409
+    # FA type 5 = 3.20 wt%      -> M$ 4.03739539
+    # FA type 6 = 3.20 wt% + Gd -> M$ 4.03739539
+    # The cost of burnable poison is not being considered.
+    
+    cost_dict = {
+      0: 0,
+      1: 0,
+      2: 2.69520839,
+      3: 3.24678409,
+      4: 3.24678409,
+      5: 4.03739539,
+      6: 4.03739539
+    }
+    
+    fuel_cost = 0
+    for fuel_type, fuel_count in FA_type_dict.items():
+      fuel_cost += fuel_count * cost_dict[fuel_type]
+    
     if not fuel_cost:
       return ValueError("No values returned. Check Simulate File executed correctly")
     else:
@@ -837,6 +866,106 @@ class SimulateData:
       outputDict = {'info_ids':['Constraints'], 'values':[Constraints]}
     return outputDict
 
+  def Avg_Kinf_EOC(self):
+    """
+    Return the average K-inf value for each fuel type at End-of-Cycle. 
+    """
+    kinf_map_dictionary = {}
+    searching_ = False
+    for line in self.lines:
+      if "Case" in line and "GWd/MT" in line:
+        elems = line.strip().split()
+        depl = elems[-2]
+        if depl in kinf_map_dictionary:
+          pass
+        else:
+          kinf_map_dictionary[depl] = {}
+      if "**   H-     G-     F-     E-     D-     C-     B-     A-     **" in line:
+        searching_ = False
+        
+      if searching_:
+        elems = line.strip().split()
+        if elems[0] == "**":
+          pos_list = elems[1:-1]
+        else:
+          kinf_map_dictionary[depl][elems[0]] = {}
+          for i, el in enumerate(elems[1:-1]):
+            kinf_map_dictionary[depl][elems[0]][pos_list[i]] = float(el)
+            
+      if  "PRI.STA 2KIN  - Assembly 2D Ave KINF - K-infinity" in line:
+        searching_ = True
+    print(f"Printing for debugging purposes: {kinf_map_dictionary}")
+    
+    EOC_depl = 0
+    for key in kinf_map_dictionary.keys():
+      depl = float(key)
+      if depl > float(EOC_depl) and kinf_map_dictionary[key]:
+        EOC_depl = key
+    kinf_map_dictionary_EOC = kinf_map_dictionary[EOC_depl]
+    
+    fuel_type = []
+    dict = {}
+    
+    FAlist = []
+    for line in self.lines:
+      if "'FUE.TYP'" in line:
+        p1 = line.index(",")
+        p2 = line.index("/")
+        search_space = line[p1:p2]
+        search_space = search_space.replace(",","")
+        tmp = search_space.split()
+        for i in tmp:
+          FAlist.append(float(i))
+    FAtypes = list(set(FAlist))
+    
+    fa_width = 15
+    fa_center = fa_width // 2
+    for i in range(len(FAlist)):
+      row = i//9 + fa_center
+      col = i%9 + fa_center
+      key = (row, col)
+      type = FAlist[i]
+      kinf = None
+      if type > 1:
+        kinf = kinf_map_dictionary_EOC[str(row + 1)][str(col + 1)]
+      dict[key] = {
+        "type": type,
+        "k-inf": kinf
+      }
+    for x in range(fa_width):
+      for y in range(fa_width):
+        target_x = x
+        target_y = y
+        if x < fa_center:
+          target_x = (fa_center * 2) - x
+        if y < fa_center:
+          target_y = (fa_center * 2) - y
+        dict[(x, y)] = dict[(target_x, target_y)]
+    
+    for x in range(fa_width):
+      for y in range(fa_width):
+        print(int(dict[(x, y)]["type"]), end="")
+      print()
+      
+    kinfs_by_type = {}
+    for key, value in dict.items():
+      pos_x, pos_y = key
+      type = value["type"]
+      kinf = value["k-inf"]
+      if type > 1:
+        if type not in kinfs_by_type.keys():
+          kinfs_by_type[type] = []
+        kinfs_by_type[type].append(kinf)
+    
+    averages = {k:mean(v) for k, v in kinfs_by_type.items()}
+    Avg_K_FA2 = averages[2]
+    print(f"This is average K-inf at EOC for FA type 2: {Avg_K_FA2}")
+    if not Avg_K_FA2:
+      return ValueError("No values returned. Check Simulate File executed correctly")
+    else:
+      outputDict = {'info_ids':['avg k at eoc'], 'values': [Avg_K_FA2]}
+    
+      
   def writeCSV(self, fileout):
     """
       Print Data into CSV format
