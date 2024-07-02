@@ -16,6 +16,7 @@ Created on June 04, 2022
 @author: khnguy22 NCSU
 
 comments: Interface for SIMULATE3 loading pattern optimzation
+comments: Functions to be added: Fuel cost, BU maps at EOC. 
 """
 import os
 import numpy
