@@ -20,6 +20,7 @@ comments: Functions to be added: Fuel cost, BU maps at EOC.
 """
 import os
 import numpy
+from statistics import mean
 
 class SimulateData:
   """
@@ -44,6 +45,8 @@ class SimulateData:
     self.data["PinPowerPeaking"] = self.pinPeaking()
     self.data["exposure"] = self.burnupEOC()
     self.data["assembly_power"] = self.assemblyPeakingFactors()
+    self.data["fuel_cost"] = self.fuel_cost()
+    
     # this is a dummy variable for demonstration with MOF
     # check if something has been found
     if all(v is None for v in self.data.values()):
@@ -486,6 +489,73 @@ class SimulateData:
       outputDict = {'info_ids':['exposure'], 'values': [burnups[-1]] }
 
     return outputDict
+
+  def fuel_cost(self):
+    """
+      Extracts the fuel types used in the core map and calculates the fuel cost based on a front end approach.
+      This function only applies to quarter core maps.
+      @ In, None
+      @ Out, outputDict, dict, the dictionary containing the read data (None if none found)
+                        {'info_ids':list(of ids of data),
+                          'values': list}
+    """
+    outputDict = None
+    # First, we parse the core map from the output file
+    FA_list = []
+    for line in self.lines:
+      if "'FUE,TYP'" in line:
+        p1 = line.index(",")
+        p2 = line.index("/")
+        search_space = line[p1:p2]
+        search_space = search_space.replace(",","")
+        temp = search_space.split()
+        for i in temp:
+          FA_list.append(float(i))
+    FA_types = list(set(FA_list))
+    quartercore_size = len(temp)
+    # We separate the core map based on occurence in symmetry
+    FA_list_A = FA_list[0]
+    FA_list_B = FA_list[1:quartercore_size] + FA_list[quartercore_size:quartercore_size*(quartercore_size - 1)+1:quartercore_size]
+    FA_list_C = []
+    for i in range(quartercore_size-1):
+      FA_list_C.append(FA_list[(i+1)*quartercore_size + 1: (i+2)*quartercore_size])
+    FA_list_C = [item for sublist in FA_list_C for item in sublist] # To flatten FA_list_C
+    # Now we count fuel type occurences in our core
+    FA_count_A = [float(fa == FA_list_A) for fa in FA_types]
+    FA_count_B = [float(FA_list_B.count(fa)*2) for fa in FA_types]
+    FA_count_C = [float(FA_list_C.count(fa)*4) for fa in FA_types]
+    FA_count = [FA_count_A[j] + FA_count_B[j] + FA_count_C[j] for j in range(len(FA_types))]
+    # Dictionary with all fuel types count
+    FA_types_dict = {int(FA_types[i]):FA_count[i] for i in range(len(FA_types))}
+    # Dictionary with unit cost for each FA type
+    
+    # FA type 0 = empty             -> M$ 0.0
+    # FA type 1 = reflector         -> M$ 0.0
+    # FA type 2 = 2.00 wt%          -> M$ 2.69520839
+    # FA type 3 = 2.50 wt%          -> M$ 3.24678409
+    # FA type 4 = 2.50 wt% + Gd     -> M$ 3.24678409
+    # FA type 5 = 3.20 wt%          -> M$ 4.03739539
+    # FA type 6 = 3.20 wt% + Gd     -> M$ 4.03739539
+    
+    cost_dict = {
+      0: 0,
+      1: 0,
+      2: 2.69520839,
+      3: 3.24678409,
+      4: 3.24678409,
+      5: 4.03739539,
+      6: 4.03739539
+    }
+
+    fuel_cost = 0
+    for fuel_type, fuel_count in FA_types_dict.items():
+      fuel_cost += fuel_count * cost_dict[fuel_type]
+      
+    if not fuel_cost:
+      return ValueError("No values returned. Check Simulate File executed correctly")
+    else:
+      outputDict = {'info_ids':['fuel_cost'], 'values': [fuel_cost] }
+    return outputDict     
 
   def writeCSV(self, fileout):
     """
